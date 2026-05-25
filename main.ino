@@ -2,6 +2,7 @@
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include "Adafruit_BME680.h"
+#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <WiFi.h>
 #include <FirebaseESP32.h>
@@ -17,6 +18,9 @@
 #include "UUID.h"
 
 #define SEALEVELPRESSURE_HPA (1013.25)
+#define BOOT_PIN 0
+#define LED_PIN 48  
+#define NUM_LEDS 1
 
 // Define Firebase Data object
 FirebaseData fbdo;
@@ -24,16 +28,25 @@ FirebaseAuth auth;
 FirebaseConfig config;
 
 Adafruit_BME680 bme(&Wire);
+Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 UUID uuid;
 
-char base_location[] = "/data/temp/";
+const char *base_location = "/data/temp/";
+bool send_data;
+volatile bool button_pressed = false;
 
+void ARDUINO_ISR_ATTR button_isr() {
+  button_pressed = true;
+}
 
 void setup() {
+  pinMode(BOOT_PIN, INPUT_PULLUP);
+  attachInterrupt(BOOT_PIN, button_isr, RISING);
   Serial.begin(115200);
 
-  while (!Serial);
+  while (!Serial)
+    ;
 
   /*******************************************************************
     SENSOR SETUP 
@@ -68,6 +81,10 @@ void setup() {
   Serial.println(WiFi.localIP());
   Serial.println();
 
+  /*******************************************************************
+    FIREBASE SETUP 
+  ********************************************************************/
+
   Serial.printf("Firebase Client v%s\n\n", FIREBASE_CLIENT_VERSION);
 
   /* Assign the api key (required) */
@@ -90,17 +107,6 @@ void setup() {
   // Large data transmission may require larger RX buffer, otherwise connection issue or data read time out can be occurred.
   fbdo.setBSSLBufferSize(4096 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
 
-  // Or use legacy authenticate method
-  // config.database_url = DATABASE_URL;
-  // config.signer.tokens.legacy_token = "<database secret>";
-
-  // To connect without auth in Test Mode, see Authentications/TestMode/TestMode.ino
-
-  //////////////////////////////////////////////////////////////////////////////////////////////
-  // Please make sure the device free Heap is not lower than 80 k for ESP32 and 10 k for ESP8266,
-  // otherwise the SSL connection will fail.
-  //////////////////////////////////////////////////////////////////////////////////////////////
-
   Firebase.begin(&config, &auth);
 
   Firebase.setDoubleDigits(5);
@@ -108,13 +114,39 @@ void setup() {
   uint32_t seed1 = random(999999999);
   uint32_t seed2 = random(999999999);
   uuid.seed(seed1, seed2);
+
+  /*******************************************************************
+    LED SETUP 
+  ********************************************************************/
+
+  strip.begin();
+  strip.setBrightness(15); // Set brightness (0-255)
+  strip.setPixelColor(0, strip.Color(255, 0, 0));
+  strip.show();
+
+
+  send_data = false;
 }
 
 void loop() {
+  if (button_pressed) {
+    if (!send_data) {
+      strip.setPixelColor(0, strip.Color(0, 255, 0));
+      Serial.print("Send data enabled\n");
+    } else {
+      strip.setPixelColor(0, strip.Color(255, 0, 0));
+      Serial.print("Send data disabled\n");
+    }
+    send_data = !send_data;
+    strip.show();
+    button_pressed = false;
+  }
+
   if (!bme.performReading()) {
     Serial.println("Failed to perform reading :(");
     return;
   }
+
   Serial.print("Temperature = ");
   Serial.print(bme.temperature * (9.0 / 5.0) + 32);
   Serial.println(" *F");
@@ -137,16 +169,17 @@ void loop() {
 
   Serial.println();
 
-  uuid.generate();
+  if (send_data) {
+    uuid.generate();
 
-  char location[128];
-  strcpy(location, base_location);
-  strcat(location, uuid.toCharArray());
-  Serial.printf("%s\n", location);
+    char location[128];
+    strcpy(location, base_location);
+    strcat(location, uuid.toCharArray());
+    Serial.printf("%s\n", location);
+    if (!Firebase.setFloat(fbdo, location, bme.temperature)) {
+      Serial.printf("%s\n", fbdo.errorReason().c_str());
+    }
+  }
 
-  Serial.printf("Set float... %s\n", Firebase.setFloat(fbdo, location, bme.temperature) ? "ok" : fbdo.errorReason().c_str());
-
-  //Serial.printf("Get float... %s\n", Firebase.getFloat(fbdo, F(&"/test/" + uuid.toCharArray())) ? String(fbdo.to<float>()).c_str() : fbdo.errorReason().c_str());
-
-  delay(5000);
+  delay(1000);
 }
