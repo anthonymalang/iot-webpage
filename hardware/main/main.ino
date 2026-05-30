@@ -1,7 +1,6 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BME280.h>
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <WiFi.h>
@@ -19,7 +18,11 @@
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 #define BOOT_PIN 0
-#define LED_PIN 38  
+#ifdef ESP_INITIAL
+  #define LED_PIN 48
+#else
+  #define LED_PIN 38
+#endif
 #define NUM_LEDS 1
 
 // Define Firebase Data object
@@ -27,7 +30,11 @@ FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 
-Adafruit_BME280 bme;
+#ifdef BME_680
+  Adafruit_BME680 bme(&Wire);
+#else
+  Adafruit_BME280 bme;
+#endif
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 UUID uuid;
@@ -53,17 +60,19 @@ void setup() {
   ********************************************************************/
 
   if (!bme.begin()) {
-    Serial.println("Could not find a valid BME680 sensor, check wiring!");
+    Serial.println("Could not find a valid BME sensor, check wiring!");
     while (1)
       ;
   }
 
-  // Set up oversampling and filter initialization
-  // bme.setTemperatureOversampling(BME280_OS_8X);
-  // bme.setHumidityOversampling(BME280_OS_2X);
-  // bme.setPressureOversampling(BME280_OS_4X);
-  // bme.setIIRFilterSize(BME280_FILTER_SIZE_3);
-  // bme.setGasHeater(320, 150);  // 320*C for 150 ms
+  #ifdef BME_680
+    // Set up oversampling and filter initialization
+    bme.setTemperatureOversampling(BME680_OS_8X);
+    bme.setHumidityOversampling(BME680_OS_2X);
+    bme.setPressureOversampling(BME680_OS_4X);
+    bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+    bme.setGasHeater(320, 150);  // 320*C for 150 ms
+  #endif
 
 
   /*******************************************************************
@@ -124,9 +133,35 @@ void setup() {
   strip.setPixelColor(0, strip.Color(255, 0, 0));
   strip.show();
 
-
   send_data = false;
 }
+
+#ifdef BME_680
+  void send_sensor_data(char *path, FirebaseJson json) {
+    if (!bme.performReading()) {
+      Serial.println("Failed to perform reading :(");
+      return;
+    }
+    json.add("temperature", bme.temperature * (9.0 / 5.0) + 32);
+    json.add("pressure", bme.pressure / 100.0);
+    json.add("humidity", bme.humidity);
+    json.add("gas",bme.gas_resistance / 1000.0);
+    json.add("altitude", bme.readAltitude(SEALEVELPRESSURE_HPA));
+    if (!Firebase.set(fbdo, path, json)) {
+      Serial.printf("%s\n", fbdo.errorReason().c_str());
+    }
+  }
+#else
+  void send_sensor_data(char *path, FirebaseJson json) {
+    json.add("temperature", (bme.readTemperature() * 1.8) + 32);
+    json.add("pressure", bme.readPressure() / 100.0F);
+    json.add("humidity", bme.readHumidity());
+    json.add("altitude", bme.readAltitude(SEALEVELPRESSURE_HPA));
+    if (!Firebase.set(fbdo, path, json)) {
+      Serial.printf("%s\n", fbdo.errorReason().c_str());
+    }
+  }
+#endif
 
 void loop() {
   if (button_pressed) {
@@ -142,10 +177,6 @@ void loop() {
     button_pressed = false;
   }
 
-
-
-  printValues();
-
   if (send_data) {
     uuid.generate();
 
@@ -153,31 +184,9 @@ void loop() {
     strcpy(location, base_location);
     strcat(location, uuid.toCharArray());
     Serial.printf("%s\n", location);
-    if (!Firebase.setFloat(fbdo, location, bme.readTemperature())) {
-      Serial.printf("%s\n", fbdo.errorReason().c_str());
-    }
+    FirebaseJson json;
+    send_sensor_data((char *)location, json);
   }
 
   delay(1000);
-}
-
-void printValues() {
-  Serial.print("Temperature = ");
-  Serial.print((bme.readTemperature() * 1.8) + 32);
-  Serial.println(" °F");
-
-  Serial.print("Pressure = ");
-
-  Serial.print(bme.readPressure() / 100.0F);
-  Serial.println(" hPa");
-
-  Serial.print("Approx. Altitude = ");
-  Serial.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
-  Serial.println(" m");
-
-  Serial.print("Humidity = ");
-  Serial.print(bme.readHumidity());
-  Serial.println(" %");
-
-  Serial.println();
 }
