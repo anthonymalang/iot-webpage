@@ -1,7 +1,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
-#include "Adafruit_BME680.h"
+#include <Adafruit_BME280.h>
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <WiFi.h>
@@ -19,7 +19,7 @@
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 #define BOOT_PIN 0
-#define LED_PIN 48  
+#define LED_PIN 38  
 #define NUM_LEDS 1
 
 // Define Firebase Data object
@@ -27,12 +27,12 @@ FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 
-Adafruit_BME680 bme(&Wire);
+Adafruit_BME280 bme;
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 UUID uuid;
 
-const char *base_location = "/data/temp/";
+const char *base_location = "/test1/";
 bool send_data;
 volatile bool button_pressed = false;
 
@@ -59,11 +59,11 @@ void setup() {
   }
 
   // Set up oversampling and filter initialization
-  bme.setTemperatureOversampling(BME680_OS_8X);
-  bme.setHumidityOversampling(BME680_OS_2X);
-  bme.setPressureOversampling(BME680_OS_4X);
-  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-  bme.setGasHeater(320, 150);  // 320*C for 150 ms
+  // bme.setTemperatureOversampling(BME280_OS_8X);
+  // bme.setHumidityOversampling(BME280_OS_2X);
+  // bme.setPressureOversampling(BME280_OS_4X);
+  // bme.setIIRFilterSize(BME280_FILTER_SIZE_3);
+  // bme.setGasHeater(320, 150);  // 320*C for 150 ms
 
 
   /*******************************************************************
@@ -142,32 +142,9 @@ void loop() {
     button_pressed = false;
   }
 
-  if (!bme.performReading()) {
-    Serial.println("Failed to perform reading :(");
-    return;
-  }
 
-  Serial.print("Temperature = ");
-  Serial.print(bme.temperature * (9.0 / 5.0) + 32);
-  Serial.println(" *F");
 
-  Serial.print("Pressure = ");
-  Serial.print(bme.pressure / 100.0);
-  Serial.println(" hPa");
-
-  Serial.print("Humidity = ");
-  Serial.print(bme.humidity);
-  Serial.println(" %");
-
-  Serial.print("Gas = ");
-  Serial.print(bme.gas_resistance / 1000.0);
-  Serial.println(" KOhms");
-
-  Serial.print("Approx. Altitude = ");
-  Serial.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
-  Serial.println(" m");
-
-  Serial.println();
+  printValues();
 
   if (send_data) {
     uuid.generate();
@@ -176,10 +153,31 @@ void loop() {
     strcpy(location, base_location);
     strcat(location, uuid.toCharArray());
     Serial.printf("%s\n", location);
-    if (!Firebase.setFloat(fbdo, location, bme.temperature)) {
+    if (!Firebase.setFloat(fbdo, location, bme.readTemperature())) {
       Serial.printf("%s\n", fbdo.errorReason().c_str());
     }
   }
 
   delay(1000);
+}
+
+void printValues() {
+  Serial.print("Temperature = ");
+  Serial.print((bme.readTemperature() * 1.8) + 32);
+  Serial.println(" °F");
+
+  Serial.print("Pressure = ");
+
+  Serial.print(bme.readPressure() / 100.0F);
+  Serial.println(" hPa");
+
+  Serial.print("Approx. Altitude = ");
+  Serial.print(bme.readAltitude(SEALEVELPRESSURE_HPA));
+  Serial.println(" m");
+
+  Serial.print("Humidity = ");
+  Serial.print(bme.readHumidity());
+  Serial.println(" %");
+
+  Serial.println();
 }
