@@ -1,10 +1,12 @@
-#include <Wire.h>
-#include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
-#include <WiFi.h>
 #include <FirebaseESP32.h>
+#include <SPI.h>
+#include "time.h"
+#include "UUID.h"
+#include <WiFi.h>
+#include <Wire.h>
 
 #include "Credentials.h"
 
@@ -13,8 +15,6 @@
 
 // Provide the RTDB payload printing info and other helper functions.
 #include <addons/RTDBHelper.h>
-
-#include "UUID.h"
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 #define BOOT_PIN 0
@@ -39,7 +39,11 @@ Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 UUID uuid;
 
-const char *base_location = "/test1/";
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = -28800;
+const int daylightOffset_sec = 3600;
+
+const char *base_location = "/data/testuser/";
 bool send_data;
 volatile bool button_pressed = false;
 
@@ -89,6 +93,8 @@ void setup() {
   Serial.print("Connected with IP: ");
   Serial.println(WiFi.localIP());
   Serial.println();
+
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
   /*******************************************************************
     FIREBASE SETUP 
@@ -180,9 +186,21 @@ void loop() {
   if (send_data) {
     uuid.generate();
 
-    char location[128];
+    time_t now;
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo)) {
+      Serial.println("Failed to obtain time");
+      return;
+    }
+    time(&now);
+    Serial.print("Unix Epoch Timestamp: ");
+    Serial.println(now);
+
+    char location[64];
+    char time_str[32];
     strcpy(location, base_location);
-    strcat(location, uuid.toCharArray());
+    snprintf(time_str, sizeof(time_str), "%lld", now);
+    strcat(location, time_str);
     Serial.printf("%s\n", location);
     FirebaseJson json;
     send_sensor_data((char *)location, json);
