@@ -37,8 +37,6 @@ FirebaseConfig config;
 #endif
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-UUID uuid;
-
 const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -28800;
 const int daylightOffset_sec = 3600;
@@ -126,10 +124,6 @@ void setup() {
 
   Firebase.setDoubleDigits(5);
 
-  uint32_t seed1 = random(999999999);
-  uint32_t seed2 = random(999999999);
-  uuid.seed(seed1, seed2);
-
   /*******************************************************************
     LED SETUP 
   ********************************************************************/
@@ -143,26 +137,61 @@ void setup() {
 }
 
 #ifdef BME_680
-  void send_sensor_data(char *path, FirebaseJson json) {
+  void send_sensor_data(FirebaseJson json) {
+    time_t now;
+    time(&now);
+    char path[64];
+    char time_str[32];
+
     if (!bme.performReading()) {
       Serial.println("Failed to perform reading :(");
       return;
     }
+
     json.add("temperature", bme.temperature * (9.0 / 5.0) + 32);
     json.add("pressure", bme.pressure / 100.0);
     json.add("humidity", bme.humidity);
     json.add("gas",bme.gas_resistance / 1000.0);
     json.add("altitude", bme.readAltitude(SEALEVELPRESSURE_HPA));
+
+    strcpy(path, base_location);
+    strcat(path, "current");
+
+    if (!Firebase.set(fbdo, path, json)) {
+      Serial.printf("%s\n", fbdo.errorReason().c_str());
+    }
+
+    strcpy(path, base_location);
+    snprintf(time_str, sizeof(time_str), "%lld", now);
+    strcat(path, time_str);
+
     if (!Firebase.set(fbdo, path, json)) {
       Serial.printf("%s\n", fbdo.errorReason().c_str());
     }
   }
 #else
   void send_sensor_data(char *path, FirebaseJson json) {
+    time_t now;
+    time(&now);
+    char path[64];
+    char time_str[32];
+
     json.add("temperature", (bme.readTemperature() * 1.8) + 32);
     json.add("pressure", bme.readPressure() / 100.0F);
     json.add("humidity", bme.readHumidity());
     json.add("altitude", bme.readAltitude(SEALEVELPRESSURE_HPA));
+
+    strcpy(path, base_location);
+    strcat(path, "current");
+
+    if (!Firebase.set(fbdo, path, json)) {
+      Serial.printf("%s\n", fbdo.errorReason().c_str());
+    }
+
+    strcpy(path, base_location);
+    snprintf(time_str, sizeof(time_str), "%lld", now);
+    strcat(path, time_str);
+
     if (!Firebase.set(fbdo, path, json)) {
       Serial.printf("%s\n", fbdo.errorReason().c_str());
     }
@@ -184,26 +213,13 @@ void loop() {
   }
 
   if (send_data) {
-    uuid.generate();
-
-    time_t now;
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
       Serial.println("Failed to obtain time");
       return;
     }
-    time(&now);
-    Serial.print("Unix Epoch Timestamp: ");
-    Serial.println(now);
-
-    char location[64];
-    char time_str[32];
-    strcpy(location, base_location);
-    snprintf(time_str, sizeof(time_str), "%lld", now);
-    strcat(location, time_str);
-    Serial.printf("%s\n", location);
     FirebaseJson json;
-    send_sensor_data((char *)location, json);
+    send_sensor_data(json);
   }
 
   delay(1000);
